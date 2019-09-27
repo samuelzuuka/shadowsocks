@@ -81,13 +81,20 @@ BUF_SIZE = 32 * 1024
 class TCPRelayHandler(object):
     def __init__(self, server, fd_to_handlers, loop, local_sock, config,
                  dns_resolver, is_local):
+        # TCPRelay 对象
         self._server = server
+        # fd 对 handler 的映射，从 TCPRelay 中传递过来的
         self._fd_to_handlers = fd_to_handlers
         self._loop = loop
+        # 接收到的 connection
         self._local_sock = local_sock
+
         self._remote_sock = None
+
+        # shadowsockets 的配置
         self._config = config
         self._dns_resolver = dns_resolver
+        # 是否本地的
         self._is_local = is_local
         self._stage = STAGE_INIT
         self._encryptor = encrypt.Encryptor(config['password'],
@@ -496,6 +503,8 @@ class TCPRelay(object):
         self._dns_resolver = dns_resolver
         self._closed = False
         self._eventloop = None
+
+        # 
         self._fd_to_handlers = {}
         self._last_time = time.time()
         self.server_transfer_ul = 0L
@@ -514,15 +523,20 @@ class TCPRelay(object):
             listen_addr = config['server']
             listen_port = config['server_port']
 
+        # 获取地址信息 (family, socktype, proto, canonname, sockaddr)
         addrs = socket.getaddrinfo(listen_addr, listen_port, 0,
                                    socket.SOCK_STREAM, socket.SOL_TCP)
         if len(addrs) == 0:
             raise Exception("can't get addrinfo for %s:%d" %
                             (listen_addr, listen_port))
         af, socktype, proto, canonname, sa = addrs[0]
+        # 创建socket连接
         server_socket = socket.socket(af, socktype, proto)
+        # 设置端口关闭后立刻释放端口
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # 将 socket 绑定对应地址和端口，必须确保socket没有绑定过
         server_socket.bind(sa)
+        # 设定 非阻塞 的模式，如果数据需要等待则抛异常
         server_socket.setblocking(False)
         if config['fast_open']:
             try:
@@ -530,6 +544,7 @@ class TCPRelay(object):
             except socket.error:
                 logging.error('warning: fast open is not available')
                 self._config['fast_open'] = False
+        # 最大连接次数
         server_socket.listen(1024)
         self._server_socket = server_socket
 
@@ -539,8 +554,11 @@ class TCPRelay(object):
         if self._closed:
             raise Exception('already closed')
         self._eventloop = loop
+
+        # 事件中心添加 handler
         loop.add_handler(self._handle_events)
 
+        # 事件中心添加 描述符 和 关注的事件类型
         self._eventloop.add(self._server_socket,
                             eventloop.POLL_IN | eventloop.POLL_ERR)
 
@@ -616,17 +634,26 @@ class TCPRelay(object):
             self._timeout_offset = pos
 
     def _handle_events(self, events):
+        # 获取 event 中关联的 socket， fd（描述符）， event
         for sock, fd, event in events:
             if sock:
                 logging.log(utils.VERBOSE_LEVEL, 'fd %d %s', fd,
                             eventloop.EVENT_NAMES.get(event, event))
+            
+            # 如果是当前实例对应的 socket
             if sock == self._server_socket:
+
+                # 如果是 错误 事件，抛出异常
                 if event & eventloop.POLL_ERR:
                     # TODO
                     raise Exception('server_socket error')
+
+                # 这里肯定是PULL_IN事件，所以进行接收流程
                 try:
                     logging.debug('accept')
                     conn = self._server_socket.accept()
+
+                    # 进行转发
                     TCPRelayHandler(self, self._fd_to_handlers,
                                     self._eventloop, conn[0], self._config,
                                     self._dns_resolver, self._is_local)

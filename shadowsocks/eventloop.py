@@ -102,6 +102,7 @@ class KqueueLoop(object):
                 results[fd] |= POLL_OUT
         return results.iteritems()
 
+
     def add_fd(self, fd, mode):
         self._fds[fd] = mode
         self._control(fd, mode, select.KQ_EV_ADD)
@@ -122,6 +123,7 @@ class SelectLoop(object):
         self._w_list = set()
         self._x_list = set()
 
+    # 从事件列表中，获得一个事件，timeout 是等待的时间
     def poll(self, timeout):
         r, w, x = select.select(self._r_list, self._w_list, self._x_list,
                                 timeout)
@@ -131,6 +133,7 @@ class SelectLoop(object):
                 results[fd] |= p[1]
         return results.items()
 
+    # 将描述符，关注的事件类型，注册到事件中心
     def add_fd(self, fd, mode):
         if mode & POLL_IN:
             self._r_list.add(fd)
@@ -139,6 +142,7 @@ class SelectLoop(object):
         if mode & POLL_ERR:
             self._x_list.add(fd)
 
+    # 将描述符 从事件中心移除
     def remove_fd(self, fd):
         if fd in self._r_list:
             self._r_list.remove(fd)
@@ -147,6 +151,7 @@ class SelectLoop(object):
         if fd in self._x_list:
             self._x_list.remove(fd)
 
+    # 更新一个文件描述符关注的事件类型
     def modify_fd(self, fd, mode):
         self.remove_fd(fd)
         self.add_fd(fd, mode)
@@ -154,6 +159,8 @@ class SelectLoop(object):
 
 class EventLoop(object):
     def __init__(self):
+
+        # 按照 epoll，kqueue，select 的顺序选择 事件模型和实现
         if hasattr(select, 'epoll'):
             self._impl = EpollLoop()
             model = 'epoll'
@@ -166,35 +173,47 @@ class EventLoop(object):
         else:
             raise Exception('can not find any available functions in select '
                             'package')
+
+        # 用于存放监听的文件描述符号 到 文件信息的映射，在这个系统中是用来存放 socket 的 fd 到 socket的映射
+        # {'XXX1' : socket1, 'YYYY' : socket2}
         self._fd_to_f = {}
+        # 存放所有的handler
         self._handlers = []
+        # 是否已经停止事件循环
         self.stopping = False
         logging.debug('using event model: %s', model)
 
+    # 从事件列表中，获得一个事件，timeout 是等待的时间
     def poll(self, timeout=None):
         events = self._impl.poll(timeout)
         return [(self._fd_to_f[fd], fd, event) for fd, event in events]
 
+    # 将描述符，关注的事件类型，注册到事件中心
     def add(self, f, mode):
         fd = f.fileno()
         self._fd_to_f[fd] = f
         self._impl.add_fd(fd, mode)
 
+    # 将描述符 从事件中心移除
     def remove(self, f):
         fd = f.fileno()
         self._fd_to_f[fd] = None
         self._impl.remove_fd(fd)
 
+    # 更新一个文件描述符关注的事件类型
     def modify(self, f, mode):
         fd = f.fileno()
         self._impl.modify_fd(fd, mode)
 
+    # 向事件中心添加新的 handler
     def add_handler(self, handler):
         self._handlers.append(handler)
 
+    # 从事件中心移除 handler
     def remove_handler(self, handler):
         self._handlers.remove(handler)
 
+    # 事件中心运行
     def run(self):
         while not self.stopping:
             try:

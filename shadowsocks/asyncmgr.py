@@ -53,7 +53,7 @@ class ServerMgr(object):
 
     def _handle_data(self, sock):
         data, addr = sock.recvfrom(128)
-        #manage pwd:port:passwd:action
+        # manage pwd:port:passwd:action
         args = data.split(':')
         if len(args) < 4:
             return

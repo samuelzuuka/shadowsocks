@@ -108,7 +108,8 @@ class DbTransfer(object):
             else:
                 if row[5] == 1 and row[6] == 1 and row[1] + row[2] < row[3]:
                     logging.info('db start server at port [%s] pass [%s]' % (row[0], row[4]))
-                    ServerPool.get_instance().new_server(row[0], row[4])
+                    ServerPool.get_instance().
+                    (row[0], row[4])
 
     @staticmethod
     def thread_db():
