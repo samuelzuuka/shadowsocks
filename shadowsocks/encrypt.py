@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+# -*- coding: utf-8 -*-
 # Copyright (c) 2014 clowwindy
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -31,12 +31,15 @@ import encrypt_rc4_md5
 
 
 def random_string(length):
-    try:
-        import M2Crypto.Rand
-        return M2Crypto.Rand.rand_bytes(length)
-    except ImportError:
-        # TODO really strong enough on Linux?
-        return os.urandom(length)
+
+    return os.urandom(length)
+    # 临时采用 os.urandom
+    # try:
+    #     import M2Crypto.Rand
+    #     return M2Crypto.Rand.rand_bytes(length)
+    # except ImportError:
+    #     # TODO really strong enough on Linux?
+    #     return os.urandom(length)
 
 
 cached_tables = {}
@@ -138,6 +141,7 @@ class Encryptor(object):
             self.encrypt_table, self.decrypt_table = init_table(key)
             self.cipher = None
 
+    # 获取加密方式支持的加密长度
     def get_cipher_len(self, method):
         method = method.lower()
         m = method_supported.get(method, None)
