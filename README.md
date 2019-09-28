@@ -1,5 +1,13 @@
 shadowsocks manyuser branch
 ===========
+
+socks5
+----------------
+https://segmentfault.com/a/1190000020174099?utm_source=tag-newest
+https://www.ietf.org/rfc/rfc1928.txt
+
+
+
 Which people need this branch
 ------------------
 1.share shadowsocks server
