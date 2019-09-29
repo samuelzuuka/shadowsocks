@@ -28,7 +28,7 @@ import getopt
 import logging
 
 
-VERBOSE_LEVEL = 5
+VERBOSE_LEVEL = 1
 
 
 def check_python():

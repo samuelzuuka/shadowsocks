@@ -22,10 +22,10 @@ class DbTransfer(object):
         return DbTransfer.instance
 
     def push_db_all_user(self):
-        #更新用户流量到数据库
+        # 更新用户流量到数据库
         last_transfer = self.last_get_transfer
         curr_transfer = ServerPool.get_instance().get_servers_transfer()
-        #上次和本次的增量
+        # 上次和本次的增量
         dt_transfer = {}
         for id in curr_transfer.keys():
             if id in last_transfer:
@@ -108,8 +108,7 @@ class DbTransfer(object):
             else:
                 if row[5] == 1 and row[6] == 1 and row[1] + row[2] < row[3]:
                     logging.info('db start server at port [%s] pass [%s]' % (row[0], row[4]))
-                    ServerPool.get_instance().
-                    (row[0], row[4])
+                    ServerPool.get_instance().new_server(row[0], row[4])
 
     @staticmethod
     def thread_db():

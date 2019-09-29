@@ -20,20 +20,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
-# 
-#    SOCK5 PROTOCAL PROCESS
-
-# 
-#    1. 客户端发出请求
-#    +----+----------+----------+
-#    |VER | NMETHODS | METHODS  |
-#    +----+----------+----------+
-#    | 1  |    1     | 1 to 255 |
-#    +----+----------+----------+
-# 
-
-
 
 
 import time
@@ -47,7 +33,10 @@ import encrypt
 import eventloop
 import utils
 from common import parse_header
-import json
+import socks5
+
+
+
 
 
 TIMEOUTS_CLEAN_SIZE = 512
@@ -176,6 +165,9 @@ class TCPRelayHandler(object):
     def _update_activity(self):
         self._server.update_activity(self)
 
+    # 当socket 读写完成时候，改变事件中心订阅的对应事件类型
+    # 如果socket 写入完成，状态变成了 STATUS_WAIT_READING, 则订阅 POOL_IN，POOL_ERR 事件
+    # 如果socket 读入完成，状态变成了 STATUS_WAIT_WRITING，则订阅 POOL_OUT，POOL_ERR 事件
     def _update_stream(self, stream, status):
         dirty = False
         if stream == STREAM_DOWN:
@@ -186,6 +178,10 @@ class TCPRelayHandler(object):
             if self._upstream_status != status:
                 self._upstream_status = status
                 dirty = True
+
+        # 如果stream status 有改变，则对应改变注册的事件类型，这里是为了减少订阅所有事件带来的额外开销
+        # 如果状态变成了 STATUS_WAIT_READING, 则订阅 POOL_IN，POOL_ERR 事件
+        # 如果状态变成了 STATUS_WAIT_WRITING，则订阅 POOL_OUT，POOL_ERR 事件
         if dirty:
             if self._local_sock:
                 event = eventloop.POLL_ERR
@@ -193,6 +189,7 @@ class TCPRelayHandler(object):
                     event |= eventloop.POLL_OUT
                 if self._upstream_status & WAIT_STATUS_READING:
                     event |= eventloop.POLL_IN
+
                 self._loop.modify(self._local_sock, event)
             if self._remote_sock:
                 event = eventloop.POLL_ERR
@@ -206,10 +203,15 @@ class TCPRelayHandler(object):
     def _write_to_sock(self, data, sock):
         if not data or not sock:
             return False
+
         uncomplete = False
         try:
             l = len(data)
             s = sock.send(data)
+
+            logging.debug('[send] >> ' + socks5.SOCKS5.socks5_data_to_bin_str(data))
+            logging.debug('[send] >> ' + data)
+
             if s < l:
                 data = data[s:]
                 uncomplete = True
@@ -224,6 +226,8 @@ class TCPRelayHandler(object):
                     traceback.print_exc()
                 self.destroy()
                 return False
+
+        # 如果buffer 读写没有完成，则继续
         if uncomplete:
             if sock == self._local_sock:
                 self._data_to_write_to_local.append(data)
@@ -233,6 +237,7 @@ class TCPRelayHandler(object):
                 self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
             else:
                 logging.error('write_all_to_sock:unknown socket')
+        # 如果buffer读写完成了，则更新对应的状态和事件
         else:
             if sock == self._local_sock:
                 self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
@@ -315,15 +320,21 @@ class TCPRelayHandler(object):
             # pause reading
             self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
             self._stage = STAGE_DNS
+
             if self._is_local:
+                proxy_server = self._chosen_server[0]
+                proxy_port = self._chosen_server[1]
                 # forward address to remote
-                self._write_to_sock('\x05\x00\x00\x01\x00\x00\x00\x00\x10\x10',
-                                    self._local_sock)
+                # client_command_resp = socks5.SOCKS5.client_command_resp(socks5.SOCKS5_ADDR_TYPES['A'])
+                # self._write_to_sock('\x05\x00\x00\x01\x00\x00\x00\x00\x10\x10',
+                #                     self._local_sock)
+                client_command_resp = socks5.SOCKS5.client_command_resp(proxy_server, proxy_port)
+                # self._write_to_sock('\x05\x00\x00\x01\x00\x00\x00\x00\x10\x10', self._local_sock)
+                self._write_to_sock(client_command_resp, self._local_sock)
                 data_to_send = self._encryptor.encrypt(data)
                 self._data_to_write_to_remote.append(data_to_send)
                 # notice here may go into _handle_dns_resolved directly
-                self._dns_resolver.resolve(self._chosen_server[0],
-                                           self._handle_dns_resolved)
+                self._dns_resolver.resolve(proxy_server, self._handle_dns_resolved)
             else:
                 if len(data) > header_length:
                     self._data_to_write_to_remote.append(data[header_length:])
@@ -372,8 +383,7 @@ class TCPRelayHandler(object):
                         self._update_stream(STREAM_UP, WAIT_STATUS_READING)
                         # TODO when there is already data in this packet
                     else:
-                        remote_sock = self._create_remote_socket(remote_addr,
-                                                                 remote_port)
+                        remote_sock = self._create_remote_socket(remote_addr, remote_port)
                         try:
                             remote_sock.connect((remote_addr, remote_port))
                         except (OSError, IOError) as e:
@@ -411,11 +421,8 @@ class TCPRelayHandler(object):
         # 更新流量统计
         self._server.server_transfer_ul += len(data)
 
-        # for v in data:
-        #     try:
-        #         print(int(v))
-        #     except Exception as e:
-        #         print(e.message)
+        logging.info('[recv] >> ' + socks5.SOCKS5.socks5_data_to_bin_str(data))
+        logging.info('[recv] >> ' + (data))
 
         # 如果是服务器，则解密客户端的数据
         if not is_local:
@@ -432,7 +439,9 @@ class TCPRelayHandler(object):
         # 如果是客户端的 init 阶段，写入 SOCKET5
         elif is_local and self._stage == STAGE_INIT:
             # TODO check auth method
-            self._write_to_sock('\x05\00', self._local_sock)
+            server_auth = socks5.SOCKS5.client_auth_resp()
+            # self._write_to_sock('\x05\00', self._local_sock)
+            self._write_to_sock(server_auth, self._local_sock)
             self._stage = STAGE_HELLO
             return
         elif self._stage == STAGE_REPLY:
@@ -562,6 +571,7 @@ class TCPRelayHandler(object):
                 pass
         self._dns_resolver.remove_callback(self._handle_dns_resolved)
         self._server.remove_handler(self)
+
 
 class TCPRelay(object):
 
@@ -739,7 +749,7 @@ class TCPRelay(object):
         # 获取 event 中关联的 socket， fd（描述符）， event
         for sock, fd, event in events:
             if sock:
-                logging.log(utils.VERBOSE_LEVEL, 'fd %d %s', fd, eventloop.EVENT_NAMES.get(event, event))
+                logging.debug('fd %d %s', fd, eventloop.EVENT_NAMES.get(event, event))
             
             # 如果是socket_server 的事件回调
             if sock == self._server_socket:
